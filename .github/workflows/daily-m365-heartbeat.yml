@@ -31,7 +31,7 @@ jobs:
     - name: Create success log
       if: success()
       run: |
-        echo "Workflow completed successfully on $(date)" >> $GITHUB_WORKSPACE/heartbeat-success.log
+        echo "Workflow completed successfully on $(date)" >> $GITHUB_WORKSPACE/heartbeat-success-$(date).log
         
     - name: Upload success log
       uses: actions/upload-artifact@v4
