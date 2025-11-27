@@ -1,0 +1,41 @@
+name: Daily M365 Developer Heartbeat
+
+on:
+  schedule:
+    # Runs at 9 AM UTC every day
+    - cron: '0 9 * * *'
+  workflow_dispatch: # Allows manual triggering
+
+env:
+  TENANT_ID: ${{ secrets.TENANT_ID }}
+  CLIENT_ID: ${{ secrets.CLIENT_ID }}
+  CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup PowerShell
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0'
+
+    - name: Run M365 Heartbeat Script
+      shell: pwsh
+      run: |
+        .\Scripts\daily-heartbeat.ps1 -TenantId "$env:TENANT_ID" -ClientId "$env:CLIENT_ID" -ClientSecret "$env:CLIENT_SECRET"
+        
+    - name: Create success log
+      if: success()
+      run: |
+        echo "Workflow completed successfully at $(date)" >> $GITHUB_WORKSPACE/heartbeat-success.log
+        
+    - name: Upload success log
+      uses: actions/upload-artifact@v4
+      with:
+        name: heartbeat-logs
+        path: ${{ github.workspace }}/heartbeat-success.log
+        retention-days: 1
