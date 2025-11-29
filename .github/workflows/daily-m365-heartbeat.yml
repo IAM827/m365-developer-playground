@@ -26,7 +26,7 @@ jobs:
       run: |
         # FIXED: Use forward slashes '/' for Linux runners
         # FIXED: Ensure 'scripts' matches your folder case (usually lowercase)
-        ./Scripts/daily-heartbeat.ps1 -TenantId "$env:TENANT_ID" -ClientId "$env:CLIENT_ID" -ClientSecret "$env:CLIENT_SECRET"
+        ./scripts/daily-heartbeat.ps1 -TenantId "$env:TENANT_ID" -ClientId "$env:CLIENT_ID" -ClientSecret "$env:CLIENT_SECRET"
         
     - name: Upload Heartbeat Report
       uses: actions/upload-artifact@v4
