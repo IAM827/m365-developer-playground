@@ -36,6 +36,12 @@ function Invoke-GraphRequest {
         return Invoke-RestMethod -Uri $Uri -Headers $Headers -Method $Method -ErrorAction Stop
     }
     catch {
+        # FIX: Handle 404 Not Found cleanly (Common for users without OneDrive)
+        if ($_.Exception.Message -match "404") {
+            Write-Host "   - Note: Resource not found (404). User likely has no OneDrive provisioned. Skipping." -ForegroundColor DarkGray
+            return $null
+        }
+        
         Write-Warning "API Call Failed [$Uri]: $($_.Exception.Message)"
         return $null
     }
@@ -47,38 +53,43 @@ try {
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     Write-Host "Timestamp: $timestamp"
     
-    # 1. Authenticate
+    # --- COIN FLIP RANDOMIZER ---
+    $diceRoll = Get-Random -Minimum 1 -Maximum 11
+    Write-Host "Daily Randomizer Roll: $diceRoll / 10" -ForegroundColor Magenta
+    # ----------------------------
+
+    # 1. Authenticate (Always Runs)
     $accessToken = Get-AccessToken -TenantId $TenantId -ClientId $ClientId -ClientSecret $ClientSecret
     $headers = @{
         'Authorization' = "Bearer $accessToken"
         'Content-Type' = 'application/json'
     }
 
-    # 2. Random User Lookup
+    # 2. Random User Lookup (Always Runs)
     Write-Host "`n1. Finding a random target user..." -ForegroundColor Yellow
-    
-    # Fetch top 50 users to give a better pool for randomization
     $usersReq = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/users?`$top=50&`$select=id,displayName,mail,userPrincipalName" -Headers $headers
-    
-    # Filter for users with emails, then pick ONE randomly
     $targetUser = $usersReq.value | Where-Object { -not [string]::IsNullOrWhiteSpace($_.mail) } | Get-Random
     
     if ($targetUser) {
         Write-Host "   - Random User Selected: $($targetUser.displayName) ($($targetUser.mail))" -ForegroundColor Green
     } else {
-        Write-Warning "   - No valid users found in the top 50. Skipping user-specific tests."
+        Write-Warning "   - No valid users found. Skipping user-specific tests."
     }
 
-    # Activity 3: SharePoint Sites
-    Write-Host "`n2. Accessing SharePoint sites..." -ForegroundColor Yellow
-    $sites = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/sites?`$top=3" -Headers $headers
-    if ($sites) {
-        foreach ($site in $sites.value) {
-            Write-Host "   - Site: $($site.displayName)" -ForegroundColor Gray
+    # 3. Activity: SharePoint Sites (Runs 70% of the time)
+    if ($diceRoll -le 7) {
+        Write-Host "`n2. Accessing SharePoint sites..." -ForegroundColor Yellow
+        $sites = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/sites?`$top=3" -Headers $headers
+        if ($sites) {
+            foreach ($site in $sites.value) {
+                Write-Host "   - Site: $($site.displayName)" -ForegroundColor Gray
+            }
         }
+    } else {
+        Write-Host "`n2. Skipping SharePoint activity today (Randomizer)" -ForegroundColor Gray
     }
 
-    # Activity 4: Exchange Online (Read)
+    # 4. Activity: Exchange Online (Always runs if user found)
     if ($targetUser) {
         Write-Host "`n3. Checking recent emails for $($targetUser.mail)..." -ForegroundColor Yellow
         $messages = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/users/$($targetUser.id)/messages?`$top=3&`$select=subject,receivedDateTime" -Headers $headers
@@ -89,25 +100,29 @@ try {
         }
     }
 
-    # Activity 5: OneDrive (Write & Delete)
-    if ($targetUser) {
-        Write-Host "`n4. Performing OneDrive Write/Delete Activity..." -ForegroundColor Yellow
-        $folderName = "_Heartbeat_Temp_$(Get-Date -Format 'MMddHHmm')"
-        $folderPayload = @{
-            name = $folderName
-            folder = @{}
-            "@microsoft.graph.conflictBehavior" = "rename"
-        } | ConvertTo-Json
+    # 5. Activity: OneDrive Write/Delete (Runs 70% of the time)
+    if ($diceRoll -ge 4) {
+        if ($targetUser) {
+            Write-Host "`n4. Performing OneDrive Write/Delete Activity..." -ForegroundColor Yellow
+            $folderName = "_Heartbeat_Temp_$(Get-Date -Format 'MMddHHmm')"
+            $folderPayload = @{
+                name = $folderName
+                folder = @{}
+                "@microsoft.graph.conflictBehavior" = "rename"
+            } | ConvertTo-Json
 
-        # Create Folder
-        $createRes = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/users/$($targetUser.id)/drive/root/children" -Headers $headers -Method Post -Body $folderPayload
-        
-        if ($createRes) {
-            Write-Host "   - Created temp folder: $folderName" -ForegroundColor Green
-            # Clean up immediately
-            Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/users/$($targetUser.id)/drive/items/$($createRes.id)" -Headers $headers -Method Delete
-            Write-Host "   - Deleted temp folder (Cleanup)" -ForegroundColor Green
+            # Create Folder
+            $createRes = Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/users/$($targetUser.id)/drive/root/children" -Headers $headers -Method Post -Body $folderPayload
+            
+            if ($createRes) {
+                Write-Host "   - Created temp folder: $folderName" -ForegroundColor Green
+                # Clean up immediately
+                Invoke-GraphRequest -Uri "https://graph.microsoft.com/v1.0/users/$($targetUser.id)/drive/items/$($createRes.id)" -Headers $headers -Method Delete
+                Write-Host "   - Deleted temp folder (Cleanup)" -ForegroundColor Green
+            }
         }
+    } else {
+        Write-Host "`n4. Skipping OneDrive activity today (Randomizer)" -ForegroundColor Gray
     }
 
     # 6. Save Report with Unique Suffix
@@ -117,8 +132,9 @@ try {
     $report = @{
         Status = "Success"
         Timestamp = $timestamp
+        RandomDiceRoll = $diceRoll
         TargetUser = if ($targetUser) { $targetUser.userPrincipalName } else { "None" }
-        ActivityType = "Daily Heartbeat"
+        ActivityType = "Daily Heartbeat (Randomized)"
     }
     
     $report | ConvertTo-Json | Out-File $fileName
